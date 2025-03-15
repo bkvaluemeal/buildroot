@@ -1,0 +1,265 @@
+diff --git a/makefile b/makefile
+index e5fa5b2..ccddc79 100644
+--- a/makefile
++++ b/makefile
+@@ -4,7 +4,7 @@ FLAGS = -std=c99 -pedantic -g
+ FLAGS+= -Wall -Wextra -Werror=vla -Wno-unused-parameter
+ #FLAGS+= -DDEBUG
+ FLAGS+= -DLY_VERSION=\"$(shell git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g')\"
+-LINK = -lpam -lxcb
++LINK = -lpam
+ VALGRIND = --show-leak-kinds=all --track-origins=yes --leak-check=full --suppressions=../res/valgrind.supp
+ CMD = ./$(NAME)
+ 
+diff --git a/src/inputs.h b/src/inputs.h
+index d0f0f61..8d69c7f 100644
+--- a/src/inputs.h
++++ b/src/inputs.h
+@@ -5,7 +5,7 @@
+ 
+ #include <stdint.h>
+ 
+-enum display_server {DS_WAYLAND, DS_SHELL, DS_XINITRC, DS_XORG};
++enum display_server {DS_WAYLAND, DS_SHELL};
+ 
+ struct text
+ {
+diff --git a/src/inputs.c b/src/inputs.c
+index 1753677..4f6eecb 100644
+--- a/src/inputs.c
++++ b/src/inputs.c
+@@ -84,7 +84,6 @@ void input_desktop(struct desktop* target)
+ 	target->len = 0;
+ 
+ 	input_desktop_add(target, strdup(lang.shell), strdup(""), DS_SHELL);
+-	input_desktop_add(target, strdup(lang.xinitrc), strdup(config.xinitrc), DS_XINITRC);
+ #if 0
+ 	input_desktop_add(target, strdup(lang.wayland), strdup(""), DS_WAYLAND);
+ #endif
+diff --git a/src/login.c b/src/login.c
+index ece1ee6..cd4c285 100644
+--- a/src/login.c
++++ b/src/login.c
+@@ -20,7 +20,6 @@
+ #include <sys/wait.h>
+ #include <unistd.h>
+ #include <utmp.h>
+-#include <xcb/xcb.h>
+ 
+ int get_free_display()
+ {
+@@ -213,7 +212,7 @@ void env_init(struct passwd* pwd)
+ 	char* lang = getenv("LANG");
+ 	// clean env
+ 	environ[0] = NULL;
+-	
++
+ 	setenv("TERM", term ? term : "linux", 1);
+ 	setenv("HOME", pwd->pw_dir, 1);
+ 	setenv("PWD", pwd->pw_dir, 1);
+@@ -248,12 +247,6 @@ void env_xdg_session(const enum display_server display_server)
+ 			setenv("XDG_SESSION_TYPE", "tty", 0);
+ 			break;
+ 		}
+-		case DS_XINITRC:
+-		case DS_XORG:
+-		{
+-			setenv("XDG_SESSION_TYPE", "x11", 0);
+-			break;
+-		}
+ 	}
+ }
+ 
+@@ -301,151 +294,6 @@ void remove_utmp_entry(struct utmp *entry) {
+ 	endutent();
+ }
+ 
+-void xauth(const char* display_name, const char* shell, char* pwd)
+-{
+-	const char* xauth_file = "lyxauth";
+-	char* xauth_dir = getenv("XDG_RUNTIME_DIR");
+-	if ((xauth_dir == NULL) || (*xauth_dir == '\0'))
+-	{
+-		xauth_dir = getenv("XDG_CONFIG_HOME");
+-		struct stat sb;
+-		if ((xauth_dir == NULL) || (*xauth_dir == '\0'))
+-		{
+-			xauth_dir = strdup(pwd);
+-			strcat(xauth_dir, "/.config");
+-			stat(xauth_dir, &sb);
+-			if (S_ISDIR(sb.st_mode))
+-			{
+-				strcat(xauth_dir, "/ly");
+-			}
+-			else
+-			{
+-				xauth_dir = pwd;
+-				xauth_file = ".lyxauth";
+-			}
+-		}
+-		else
+-		{
+-			strcat(xauth_dir, "/ly");
+-		}
+-
+-		// If .config/ly/ or XDG_CONFIG_HOME/ly/ doesn't exist and can't create the directory, use pwd
+-		// Passing pwd beforehand is safe since stat will always evaluate false
+-		stat(xauth_dir, &sb);
+-		if (!S_ISDIR(sb.st_mode) && mkdir(xauth_dir, 0777) == -1)
+-		{
+-			xauth_dir = pwd;
+-			xauth_file = ".lyxauth";
+-		}
+-	}
+-
+-	// trim trailing slashes
+-	int i = strlen(xauth_dir) - 1;
+-	while (xauth_dir[i] == '/') i--;
+-	xauth_dir[i + 1] = '\0';
+-
+-	char xauthority[256];
+-	snprintf(xauthority, 256, "%s/%s", xauth_dir, xauth_file);
+-	setenv("XAUTHORITY", xauthority, 1);
+-	setenv("DISPLAY", display_name, 1);
+-
+-	FILE* fp = fopen(xauthority, "ab+");
+-
+-	if (fp != NULL)
+-	{
+-		fclose(fp);
+-	}
+-
+-	pid_t pid = fork();
+-
+-	if (pid == 0)
+-	{
+-		char cmd[1024];
+-		snprintf(
+-			cmd,
+-			1024,
+-			"%s add %s . `%s`",
+-			config.xauth_cmd,
+-			display_name,
+-			config.mcookie_cmd);
+-		execl(shell, shell, "-c", cmd, NULL);
+-		exit(EXIT_SUCCESS);
+-	}
+-
+-	int status;
+-	waitpid(pid, &status, 0);
+-}
+-
+-void xorg(
+-	struct passwd* pwd,
+-	const char* vt,
+-	const char* desktop_cmd)
+-{
+-	char display_name[4];
+-
+-	snprintf(display_name, 3, ":%d", get_free_display());
+-	xauth(display_name, pwd->pw_shell, pwd->pw_dir);
+-
+-	// start xorg
+-	pid_t pid = fork();
+-
+-	if (pid == 0)
+-	{
+-		char x_cmd[1024];
+-		snprintf(
+-			x_cmd,
+-			1024,
+-			"%s %s %s",
+-			config.x_cmd,
+-			display_name,
+-			vt);
+-		execl(pwd->pw_shell, pwd->pw_shell, "-c", x_cmd, NULL);
+-		exit(EXIT_SUCCESS);
+-	}
+-
+-	int ok;
+-	xcb_connection_t* xcb;
+-
+-	do
+-	{
+-		xcb = xcb_connect(NULL, NULL);
+-		ok = xcb_connection_has_error(xcb);
+-		kill(pid, 0);
+-	}
+-	while((ok != 0) && (errno != ESRCH));
+-
+-	if (ok != 0)
+-	{
+-		return;
+-	}
+-
+-	pid_t xorg_pid = fork();
+-
+-	if (xorg_pid == 0)
+-	{
+-		char de_cmd[1024];
+-		snprintf(
+-			de_cmd,
+-			1024,
+-			"%s %s",
+-			config.x_cmd_setup,
+-			desktop_cmd);
+-		execl(pwd->pw_shell, pwd->pw_shell, "-c", de_cmd, NULL);
+-		exit(EXIT_SUCCESS);
+-	}
+-
+-	int status;
+-	waitpid(xorg_pid, &status, 0);
+-	xcb_disconnect(xcb);
+-	kill(pid, 0);
+-
+-	if (errno != ESRCH)
+-	{
+-		kill(pid, SIGTERM);
+-		waitpid(pid, &status, 0);
+-	}
+-}
+-
+ void wayland(
+ 	struct passwd* pwd,
+ 	const char* desktop_cmd)
+@@ -659,12 +507,6 @@ void auth(
+ 				shell(pwd);
+ 				break;
+ 			}
+-			case DS_XINITRC:
+-			case DS_XORG:
+-			{
+-				xorg(pwd, vt, desktop->cmd[desktop->cur]);
+-				break;
+-			}
+ 		}
+ 
+ 		exit(EXIT_SUCCESS);
+diff --git a/src/utils.c b/src/utils.c
+index b7bfabc..cb86906 100644
+--- a/src/utils.c
++++ b/src/utils.c
+@@ -59,7 +59,7 @@ void desktop_crawl(
+ 		map_desktop,
+ 	};
+ 
+-	struct configator_param sections[] =	
++	struct configator_param sections[] =
+ 	{
+ 		{"Desktop Entry", NULL, NULL},
+ 	};
+@@ -135,14 +135,6 @@ void desktop_load(struct desktop* target)
+ 		++err;
+ 		dgn_reset();
+ 	}
+-
+-	desktop_crawl(target, config.xsessions, DS_XORG);
+-
+-	if (dgn_catch())
+-	{
+-		++err;
+-		dgn_reset();
+-	}
+ }
+ 
+ static char* hostname_backup = NULL;

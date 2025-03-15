@@ -31,7 +31,6 @@ menuconfig BR2_PACKAGE_SYSTEMD
 	select BR2_PACKAGE_UTIL_LINUX
 	select BR2_PACKAGE_UTIL_LINUX_LIBS
 	select BR2_PACKAGE_UTIL_LINUX_LIBMOUNT
-	select BR2_PACKAGE_UTIL_LINUX_AGETTY
 	select BR2_PACKAGE_UTIL_LINUX_MOUNT
 	select BR2_PACKAGE_UTIL_LINUX_FSCK
 	select BR2_PACKAGE_UTIL_LINUX_SULOGIN
@@ -104,6 +103,26 @@ menuconfig BR2_PACKAGE_SYSTEMD
 	  https://freedesktop.org/wiki/Software/systemd/
 
 if BR2_PACKAGE_SYSTEMD
+
+choice
+	prompt "default getty"
+	default BR2_PACKAGE_SYSTEMD_AGETTY
+	help
+	  Select the getty used
+
+config BR2_PACKAGE_SYSTEMD_AGETTY
+	bool "agetty"
+	select BR2_PACKAGE_UTIL_LINUX_AGETTY
+	help
+	  Alternative linux getty
+
+config BR2_PACKAGE_SYSTEMD_LY
+	bool "ly"
+	select BR2_PACKAGE_LY
+	help
+	 A display manager with console UI
+
+endchoice
 
 config BR2_PACKAGE_PROVIDES_UDEV
 	default "systemd"

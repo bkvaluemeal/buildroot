@@ -1,0 +1,58 @@
+diff --git a/res/ly.service b/res/ly@.service
+similarity index 61%
+rename from res/ly.service
+rename to res/ly@.service
+index 135b987..4547ed3 100644
+--- a/res/ly.service
++++ b/res/ly@.service
+@@ -1,15 +1,19 @@
+ [Unit]
+-Description=TUI display manager
+-After=systemd-user-sessions.service plymouth-quit-wait.service
+-After=getty@tty2.service
++Description=TUI display manager on %I
++After=systemd-user-sessions.service plymouth-quit-wait.service getty-pre.target
++ConditionPathExists=/dev/tty0
+
+ [Service]
+ Type=idle
++Restart=always
++RestartSec=0
+ ExecStart=/usr/bin/ly
+ StandardInput=tty
+-TTYPath=/dev/tty2
++TTYPath=/dev/%i
+ TTYReset=yes
+ TTYVHangup=yes
+
+ [Install]
+-Alias=display-manager.service
++Alias=getty@.service
++WantedBy=getty.target
++DefaultInstance=tty1
+diff --git a/src/config.c b/src/config.c
+index 1704d9d..4bbfaa2 100644
+--- a/src/config.c
++++ b/src/config.c
+@@ -296,7 +296,7 @@ void config_defaults()
+ 	config.service_name = strdup("ly");
+ 	config.shutdown_cmd = strdup("/sbin/shutdown -a now");
+ 	config.term_reset_cmd = strdup("/usr/bin/tput reset");
+-	config.tty = 2;
++	config.tty = 1;
+ 	config.wayland_cmd = strdup(DATADIR "/wsetup.sh");
+ 	config.wayland_specifier = false;
+ 	config.waylandsessions = strdup("/usr/share/wayland-sessions");
+diff --git a/makefile b/makefile
+index ccddc79..96cfa0a 100644
+--- a/makefile
++++ b/makefile
+@@ -92,7 +92,7 @@ installnoconf: $(BIND)/$(NAME)
+ 
+ installsystemd:
+ 	@echo "installing systemd service"
+-	@install -DZ $(RESD)/ly.service -m 644 -t ${DESTDIR}/usr/lib/systemd/system
++	@install -DZ $(RESD)/ly@.service -m 644 -t ${DESTDIR}/usr/lib/systemd/system
+ 
+ installopenrc:
+ 	@echo "installing openrc service"
